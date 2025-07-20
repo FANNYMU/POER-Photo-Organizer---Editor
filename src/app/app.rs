@@ -1,24 +1,34 @@
-use iced::{Application, Command, Element, Settings, executor, Subscription, theme, Alignment};
-use iced::widget::{Column, Scrollable, Container, Button};
-use iced::alignment::Horizontal;
+use iced::{Application, Command, Element, Settings, executor, Subscription, theme, Color, Background};
+use iced::widget::{Column, Row, Scrollable, Container, Button, Text, Space};
+use iced::alignment::{Horizontal, Vertical};
+use iced::{Length, Padding};
 use std::path::PathBuf;
 use walkdir::WalkDir;
 use iced::widget::Image;
 
 pub fn main() -> iced::Result {
-    PhotoOrganizer::run(Settings::default())
+    PhotoOrganizer::run(Settings {
+        window: iced::window::Settings {
+            size: (1200, 800),
+            min_size: Some((800, 600)),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
 }
 
 struct PhotoOrganizer {
     photos: Vec<Photo>,
-    scroll: iced::widget::scrollable::State,
+    selected_photo: Option<usize>,
+    loading: bool,
+    row_count: usize,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     PhotosLoaded(Vec<Photo>),
-    Scrolled,
     PhotoSelected(usize),
+    PhotoDeselected,
 }
 
 impl Application for PhotoOrganizer {
@@ -31,51 +41,53 @@ impl Application for PhotoOrganizer {
         (
             PhotoOrganizer {
                 photos: Vec::new(),
-                scroll: iced::widget::scrollable::State::new(),
+                selected_photo: None,
+                loading: true,
+                row_count: 0,
             },
             Command::perform(load_photos(), Message::PhotosLoaded),
         )
     }
 
     fn title(&self) -> String {
-        String::from("POER - Photo Organizer & Editor Ringan")
+        String::from("POER - Photo Organizer & Editor")
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::PhotosLoaded(list) => {
+                self.row_count = (list.len() + 5) / 6; // Calculate rows needed for grid
                 self.photos = list;
+                self.loading = false;
                 Command::none()
             }
-            Message::Scrolled => Command::none(),
             Message::PhotoSelected(index) => {
-                println!("Selected photo: {}", index);
+                self.selected_photo = Some(index);
+                Command::none()
+            }
+            Message::PhotoDeselected => {
+                self.selected_photo = None;
                 Command::none()
             }
         }
     }
 
     fn view(&self) -> Element<Message> {
-        let mut content = Column::new().spacing(10).padding(10);
+        let header = create_header();
 
-        for (index, photo) in self.photos.iter().enumerate() {
-            // Wrap the Image in a Button to handle click events
-            let image_button = Button::new(
-                Image::new(photo.path.clone())
-                    .width(100)
-                    .height(100),
-            )
-                .on_press(Message::PhotoSelected(index));
+        let content = if self.loading {
+            create_loading_view()
+        } else if self.photos.is_empty() {
+            create_empty_view()
+        } else {
+            create_photo_grid(&self.photos, self.selected_photo)
+        };
 
-            content = content.push(image_button);
-        }
-
-        let scrollable = Scrollable::new(content);
-
-        Container::new(scrollable)
-            .width(iced::Length::Fill)
-            .height(iced::Length::Fill)
-            .align_x(Horizontal::Center)
+        Column::new()
+            .push(header)
+            .push(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
             .into()
     }
 
@@ -84,29 +96,254 @@ impl Application for PhotoOrganizer {
     }
 }
 
+fn create_header() -> Container<'static, Message> {
+    let title = Text::new("POER")
+        .size(28)
+        .style(theme::Text::Color(Color::from_rgb(0.2, 0.5, 0.9)));
+
+    let subtitle = Text::new("Photo Organizer & Editor")
+        .size(14)
+        .style(theme::Text::Color(Color::from_rgb(0.5, 0.5, 0.5)));
+
+    let header_content = Row::new()
+        .push(
+            Column::new()
+                .push(title)
+                .push(subtitle)
+                .spacing(2)
+        )
+        .push(Space::with_width(Length::Fill))
+        .align_items(iced::Alignment::Center)
+        .padding(Padding::new(20.0));
+
+    Container::new(header_content)
+        .width(Length::Fill)
+        .style(theme::Container::Custom(Box::new(HeaderStyle)))
+}
+
+fn create_loading_view() -> Element<'static, Message> {
+    let loading_text = Text::new("Loading photos...")
+        .size(16)
+        .style(theme::Text::Color(Color::from_rgb(0.6, 0.6, 0.6)));
+
+    Container::new(loading_text)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Horizontal::Center)
+        .align_y(Vertical::Center)
+        .into()
+}
+
+fn create_empty_view() -> Element<'static, Message> {
+    let empty_text = Text::new("No photos found in your Pictures folder")
+        .size(16)
+        .style(theme::Text::Color(Color::from_rgb(0.6, 0.6, 0.6)));
+
+    Container::new(empty_text)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Horizontal::Center)
+        .align_y(Vertical::Center)
+        .into()
+}
+
+fn create_photo_grid(photos: &[Photo], selected: Option<usize>) -> Element<Message> {
+    let mut grid_content = Column::new().spacing(16).padding(Padding::new(20.0));
+
+    // Group photos into rows of 6
+    for (row_index, row_photos) in photos.chunks(6).enumerate() {
+        let mut row = Row::new().spacing(12);
+
+        for (col_index, photo) in row_photos.iter().enumerate() {
+            let global_index = row_index * 6 + col_index;
+            let is_selected = selected == Some(global_index);
+
+            let photo_card = create_photo_card(photo, global_index, is_selected);
+            row = row.push(photo_card);
+        }
+
+        // Fill remaining space in row if needed
+        row = row.push(Space::with_width(Length::Fill));
+        grid_content = grid_content.push(row);
+    }
+
+    let scrollable = Scrollable::new(grid_content)
+        .style(theme::Scrollable::Custom(Box::new(ScrollableStyle)));
+
+    Container::new(scrollable)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(theme::Container::Custom(Box::new(BackgroundStyle)))
+        .into()
+}
+
+fn create_photo_card(photo: &Photo, index: usize, is_selected: bool) -> Button<Message> {
+    let image = Image::new(photo.path.clone())
+        .width(180)
+        .height(180);
+
+    let card_content = Container::new(image)
+        .width(180)
+        .height(180)
+        .padding(Padding::new(8.0));
+
+    Button::new(card_content)
+        .style(theme::Button::Custom(Box::new(PhotoCardStyle { is_selected })))
+        .on_press(if is_selected {
+            Message::PhotoDeselected
+        } else {
+            Message::PhotoSelected(index)
+        })
+}
+
+// Custom styles
+struct HeaderStyle;
+impl iced::widget::container::StyleSheet for HeaderStyle {
+    type Style = iced::Theme;
+
+    fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
+        iced::widget::container::Appearance {
+            background: Some(Background::Color(Color::WHITE)),
+            border_radius: 0.0.into(),
+            border_width: 0.0,
+            border_color: Color::from_rgb(0.9, 0.9, 0.9),
+            text_color: None,
+        }
+    }
+}
+
+struct BackgroundStyle;
+impl iced::widget::container::StyleSheet for BackgroundStyle {
+    type Style = iced::Theme;
+
+    fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
+        iced::widget::container::Appearance {
+            background: Some(Background::Color(Color::from_rgb(0.98, 0.98, 0.98))),
+            border_radius: 0.0.into(),
+            border_width: 0.0,
+            border_color: Color::TRANSPARENT,
+            text_color: None,
+        }
+    }
+}
+
+struct ScrollableStyle;
+impl iced::widget::scrollable::StyleSheet for ScrollableStyle {
+    type Style = iced::Theme;
+
+    fn active(&self, _style: &Self::Style) -> iced::widget::scrollable::Scrollbar {
+        iced::widget::scrollable::Scrollbar {
+            background: Some(Background::Color(Color::from_rgb(0.9, 0.9, 0.9))),
+            border_radius: 5.0.into(),
+            border_width: 0.0,
+            border_color: Color::TRANSPARENT,
+            scroller: iced::widget::scrollable::Scroller {
+                color: Color::from_rgb(0.7, 0.7, 0.7),
+                border_radius: 5.0.into(),
+                border_width: 0.0,
+                border_color: Color::TRANSPARENT,
+            },
+        }
+    }
+
+    fn hovered(&self, _style: &Self::Style, _is_mouse_over_scrollbar: bool) -> iced::widget::scrollable::Scrollbar {
+        self.active(_style)
+    }
+}
+
+struct PhotoCardStyle {
+    is_selected: bool,
+}
+
+impl iced::widget::button::StyleSheet for PhotoCardStyle {
+    type Style = iced::Theme;
+
+    fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
+        let base_color = if self.is_selected {
+            Color::from_rgb(0.95, 0.97, 1.0)
+        } else {
+            Color::WHITE
+        };
+
+        let border_width = if self.is_selected { 3.0 } else { 1.0 };
+        let border_color = if self.is_selected {
+            Color::from_rgb(0.2, 0.5, 0.9)
+        } else {
+            Color::from_rgb(0.9, 0.9, 0.9)
+        };
+
+        iced::widget::button::Appearance {
+            background: Some(Background::Color(base_color)),
+            border_radius: 12.0.into(),
+            border_width,
+            border_color,
+            shadow_offset: iced::Vector::new(0.0, 2.0),
+            text_color: Color::BLACK,
+        }
+    }
+
+    fn hovered(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
+        iced::widget::button::Appearance {
+            background: Some(Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
+            border_radius: 12.0.into(),
+            border_width: 2.0,
+            border_color: Color::from_rgb(0.2, 0.5, 0.9),
+            shadow_offset: iced::Vector::new(0.0, 4.0),
+            text_color: Color::BLACK,
+        }
+    }
+
+    fn pressed(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
+        iced::widget::button::Appearance {
+            background: Some(Background::Color(Color::from_rgb(0.9, 0.9, 0.9))),
+            border_radius: 12.0.into(),
+            border_width: 2.0,
+            border_color: Color::from_rgb(0.2, 0.5, 0.9),
+            shadow_offset: iced::Vector::new(0.0, 1.0),
+            text_color: Color::BLACK,
+        }
+    }
+
+    fn disabled(&self, style: &Self::Style) -> iced::widget::button::Appearance {
+        self.active(style)
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Photo {
     path: PathBuf,
+    name: String,
 }
 
 async fn load_photos() -> Vec<Photo> {
     let mut photos = Vec::new();
     let pictures_dir = dirs::picture_dir().unwrap_or_else(|| PathBuf::from("~/Pictures"));
 
-    for entry in WalkDir::new(pictures_dir) {
-        let entry = entry.unwrap();
-        let path = entry.path().to_path_buf();
+    for entry in WalkDir::new(pictures_dir).max_depth(3) {
+        if let Ok(entry) = entry {
+            let path = entry.path().to_path_buf();
 
-        if path.is_file() && is_image(&path) {
-            photos.push(Photo { path });
+            if path.is_file() && is_image(&path) {
+                let name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                photos.push(Photo { path, name });
+            }
         }
     }
 
+    // Sort photos by name for consistent ordering
+    photos.sort_by(|a, b| a.name.cmp(&b.name));
     photos
 }
 
 fn is_image(path: &PathBuf) -> bool {
     let extension = path.extension().and_then(|e| e.to_str());
-    matches!(extension, Some("jpg" | "jpeg" | "png" | "gif" | "bmp" | "tiff"))
+    matches!(
+        extension,
+        Some("jpg" | "jpeg" | "png" | "gif" | "bmp" | "tiff" | "webp" | "JPG" | "JPEG" | "PNG")
+    )
 }
-
