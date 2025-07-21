@@ -2,7 +2,6 @@ use iced::{Application, Command, Element, Settings, executor, Subscription, them
 use iced::widget::{Column, Row, Scrollable, Container, Button, Text, Space, Image, TextInput, Checkbox, Radio};
 use iced::{Alignment, Length, Padding};
 pub use app::photo_loader::{load_photos, Photo};
-pub use app::photo_card_style::PhotoCardStyle;
 pub use app::ui_styles::{HeaderStyle, BackgroundStyle, ScrollableStyle};
 use crate::app;
 
@@ -237,7 +236,6 @@ fn create_empty_view() -> Element<'static, Message> {
 fn create_photo_grid(photos: &[Photo], selected: Option<usize>) -> Element<Message> {
     let mut grid_content = Column::new().spacing(16).padding(Padding::new(20.0));
 
-    // Group photos into rows of 6
     for (row_index, row_photos) in photos.chunks(6).enumerate() {
         let mut row = Row::new().spacing(12);
 
@@ -249,7 +247,6 @@ fn create_photo_grid(photos: &[Photo], selected: Option<usize>) -> Element<Messa
             row = row.push(photo_card);
         }
 
-        // Fill remaining space in row if needed
         row = row.push(Space::with_width(Length::Fill));
         grid_content = grid_content.push(row);
     }
@@ -264,18 +261,67 @@ fn create_photo_grid(photos: &[Photo], selected: Option<usize>) -> Element<Messa
         .into()
 }
 
+struct PhotoCardStyle;
+
+impl iced::widget::button::StyleSheet for PhotoCardStyle {
+    type Style = iced::Theme;
+
+    fn active(&self, theme: &Self::Style) -> iced::widget::button::Appearance {
+        let palette = theme.extended_palette();
+        
+        iced::widget::button::Appearance {
+            background: Some(iced::Background::Color(Color::from_rgba(0.95, 0.95, 0.95, 0.8))),
+            border_color: Color::from_rgb(0.7, 0.7, 0.7),
+            border_width: 1.0,
+            shadow_offset: iced::Vector::new(0.0, 3.0),
+            ..Default::default()
+        }
+    }
+
+    fn hovered(&self, theme: &Self::Style) -> iced::widget::button::Appearance {
+        let palette = theme.extended_palette();
+        
+        iced::widget::button::Appearance {
+            background: Some(iced::Background::Color(Color::from_rgba(0.98, 0.98, 0.98, 0.9))),
+            border_color: Color::from_rgb(0.4, 0.6, 0.8),
+            shadow_offset: iced::Vector::new(0.0, 6.0),
+            ..Default::default()
+        }
+    }
+
+    fn pressed(&self, theme: &Self::Style) -> iced::widget::button::Appearance {
+        let palette = theme.extended_palette();
+        
+        iced::widget::button::Appearance {
+            background: Some(iced::Background::Color(Color::from_rgba(0.92, 0.92, 0.92, 0.85))),
+            border_color: Color::from_rgb(0.3, 0.5, 0.7),
+            shadow_offset: iced::Vector::new(0.0, 2.0),
+            ..Default::default()
+        }
+    }
+}
+
 fn create_photo_card(photo: &Photo, index: usize, is_selected: bool) -> Button<Message> {
     let image = Image::new(photo.path.clone())
         .width(180)
-        .height(180);
+        .height(120);
 
-    let card_content = Container::new(image)
-        .width(180)
-        .height(180)
-        .padding(Padding::new(8.0));
+    let filename = Text::new(&photo.name)
+        .size(14)
+        .style(theme::Text::Color(Color::from_rgb(0.2, 0.2, 0.2)));
+
+    let card_content = Column::new()
+        .push(image)
+        .push(filename)
+        .spacing(12)
+        .align_items(Alignment::Center)
+        .padding(Padding::new(12.0));
 
     Button::new(card_content)
-        .style(theme::Button::Custom(Box::new(PhotoCardStyle { is_selected })))
+        .width(200)
+        .height(240)
+        .padding(Padding::new(0.0))
+        .style(theme::Button::Custom(Box::new(PhotoCardStyle)))
         .on_press(if is_selected {
             Message::PhotoDeselected
         } else {
@@ -289,7 +335,6 @@ impl PhotoOrganizer {
         
         self.filtered_photos = self.photos.iter()
             .filter(|photo| {
-                // Search filter
                 if !search_term.is_empty() {
                     photo.name.to_lowercase().contains(&search_term)
                 } else {
@@ -297,7 +342,6 @@ impl PhotoOrganizer {
                 }
             })
             .filter(|photo| {
-                // File type filter
                 let extension = photo.path.extension()
                     .and_then(|e| e.to_str())
                     .unwrap_or_default()
