@@ -1,7 +1,7 @@
 use std::path::PathBuf;
+use image;
 use walkdir::WalkDir;
-use std::fs;
-use image::GenericImageView;
+use std::fs::metadata;
 
 #[derive(Clone, Debug)]
 pub struct Photo {
@@ -9,48 +9,43 @@ pub struct Photo {
     pub name: String,
     pub width: u32,
     pub height: u32,
+    pub size: u64,
 }
 
 pub async fn load_photos() -> Vec<Photo> {
     let mut photos = Vec::new();
-    let pictures_dir = fs::canonicalize(dirs::picture_dir().unwrap_or_else(|| PathBuf::from("~/Pictures"))).unwrap();
-
-    for entry in WalkDir::new(pictures_dir).max_depth(3) {
-        if let Ok(entry) = entry {
+    if let Some(pictures_dir) = dirs::picture_dir() {
+        let mut entries = WalkDir::new(pictures_dir)
+            .into_iter()
+            .filter_map(|e| e.ok());
+        
+        while let Some(entry) = entries.next() {
             let path = entry.path().to_path_buf();
-
-            if path.is_file() && is_image(&path) {
-                let name = path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-
-                let img = image::open(&path);
-                let (width, height) = match img {
-                    Ok(img) => img.dimensions(),
-                    Err(_) => (0, 0),
-                };
-
-                photos.push(Photo {
-                    path,
-                    name,
-                    width,
-                    height,
-                });
+            if path.extension().and_then(|e| e.to_str()).map_or(false, |ext| {
+                ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"].contains(&ext.to_lowercase().as_str())
+            }) {
+                if let Ok(img) = image::open(&path) {
+                    let (width, height) = (img.width(), img.height());
+                    let size = match metadata(&path) {
+                        Ok(metadata) => metadata.len(),
+                        Err(_) => 0,
+                    };
+                    let name = path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    
+                    photos.push(Photo {
+                        path,
+                        name,
+                        width,
+                        height,
+                        size,
+                    });
+                }
             }
         }
     }
-
-    // Sort photos by name for consistent ordering
-    photos.sort_by(|a, b| a.name.cmp(&b.name));
     photos
 }
 
-pub fn is_image(path: &PathBuf) -> bool {
-    let extension = path.extension().and_then(|e| e.to_str());
-    matches!(
-        extension,
-        Some("jpg" | "jpeg" | "png" | "gif" | "bmp" | "tiff" | "webp" | "JPG" | "JPEG" | "PNG")
-    )
-}

@@ -1,6 +1,11 @@
 use iced::{Application, Command, Element, Settings, executor, Subscription, theme, Color};
 use iced::widget::{Column, Row, Scrollable, Container, Button, Text, Space, Image, TextInput, Checkbox, Radio};
 use iced::{Alignment, Length, Padding};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::time::SystemTime;
+use std::cmp::Ordering;
+
 pub use app::photo_loader::{load_photos, Photo};
 pub use app::ui_styles::{HeaderStyle, BackgroundStyle, ScrollableStyle};
 use crate::app;
@@ -23,8 +28,10 @@ struct PhotoOrganizer {
     loading: bool,
     row_count: usize,
     search_term: String,
-    file_types: std::collections::HashMap<String, bool>,
+    file_types: HashMap<String, bool>,
     size_filter: SizeFilter,
+    sort_criteria: SortCriteria,
+    sort_order: SortOrder,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
@@ -35,14 +42,29 @@ pub enum SizeFilter {
     Large,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortCriteria {
+    Name,
+    Date,
+    Size,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortOrder {
+    Ascending,
+    Descending,
+}
+
 #[derive(Debug, Clone)]
-enum Message {
+pub enum Message {
     PhotosLoaded(Vec<Photo>),
     PhotoSelected(usize),
     PhotoDeselected,
     SearchInput(String),
     ToggleFileType(String),
     SelectSizeFilter(SizeFilter),
+    SortCriteriaChanged(SortCriteria),
+    ToggleSortOrder,
 }
 
 impl Application for PhotoOrganizer {
@@ -52,7 +74,7 @@ impl Application for PhotoOrganizer {
     type Flags = ();
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        let mut file_types = std::collections::HashMap::new();
+        let mut file_types = HashMap::new();
         for ext in ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"] {
             file_types.insert(ext.to_string(), true);
         }
@@ -67,6 +89,8 @@ impl Application for PhotoOrganizer {
                 search_term: String::new(),
                 file_types,
                 size_filter: SizeFilter::All,
+                sort_criteria: SortCriteria::Name,
+                sort_order: SortOrder::Ascending,
             },
             Command::perform(load_photos(), Message::PhotosLoaded),
         )
@@ -78,38 +102,44 @@ impl Application for PhotoOrganizer {
 
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
-            Message::PhotosLoaded(list) => {
-                self.photos = list;
+            Message::PhotosLoaded(photos) => {
+                self.photos = photos;
                 self.apply_filters();
                 self.loading = false;
-                Command::none()
             }
             Message::PhotoSelected(index) => {
                 self.selected_photo = Some(index);
-                Command::none()
             }
             Message::PhotoDeselected => {
                 self.selected_photo = None;
-                Command::none()
             }
             Message::SearchInput(term) => {
                 self.search_term = term;
                 self.apply_filters();
-                Command::none()
             }
             Message::ToggleFileType(ext) => {
-                if let Some(value) = self.file_types.get(&ext) {
-                    self.file_types.insert(ext, !*value);
+                if let Some(enabled) = self.file_types.get_mut(&ext) {
+                    *enabled = !*enabled;
                 }
                 self.apply_filters();
-                Command::none()
             }
-            Message::SelectSizeFilter(filter) => {
-                self.size_filter = filter;
+            Message::SelectSizeFilter(size_filter) => {
+                self.size_filter = size_filter;
                 self.apply_filters();
-                Command::none()
+            }
+            Message::SortCriteriaChanged(criteria) => {
+                self.sort_criteria = criteria;
+                self.apply_filters();
+            }
+            Message::ToggleSortOrder => {
+                self.sort_order = match self.sort_order {
+                    SortOrder::Ascending => SortOrder::Descending,
+                    SortOrder::Descending => SortOrder::Ascending,
+                };
+                self.apply_filters();
             }
         }
+        Command::none()
     }
 
     fn view(&self) -> Element<Message> {
@@ -164,7 +194,7 @@ fn create_header() -> Container<'static, Message> {
         .style(theme::Container::Custom(Box::new(HeaderStyle)))
 }
 
-fn create_filters(app: &PhotoOrganizer) -> Container<Message> {
+fn create_filters<'a>(app: &'a PhotoOrganizer) -> Container<'a, Message> {
     let search_input = Text::new("Search:")
         .size(14)
         .style(theme::Text::Color(Color::from_rgb(0.6, 0.6, 0.6)));
@@ -177,7 +207,7 @@ fn create_filters(app: &PhotoOrganizer) -> Container<Message> {
     for (ext, &enabled) in &app.file_types {
         let ext_clone = ext.clone();
         file_type_filters = file_type_filters.push(
-            Checkbox::new(ext.clone(), enabled, move |_| Message::ToggleFileType(ext_clone.clone()))
+            Checkbox::new(ext, enabled, move |_| Message::ToggleFileType(ext_clone.clone()))
         );
     }
 
@@ -196,16 +226,17 @@ fn create_filters(app: &PhotoOrganizer) -> Container<Message> {
             Radio::new("Large (>500K)", SizeFilter::Large, Some(app.size_filter), |_| Message::SelectSizeFilter(SizeFilter::Large))
         );
 
-    Container::new(
-        Column::new()
-            .push(Row::new().push(search_input).push(search_field).spacing(10))
-            .push(file_type_filters)
-            .push(size_filters)
-            .spacing(15)
-            .padding(Padding::new(20.0))
-    )
-    .width(Length::Fill)
-    .style(theme::Container::Custom(Box::new(BackgroundStyle)))
+    let filters_column = Column::new()
+        .push(Row::new().push(search_input).push(search_field).spacing(10))
+        .push(file_type_filters)
+        .push(size_filters)
+        .push(create_sorting_controls(app))
+        .spacing(15)
+        .padding(Padding::new(20.0));
+
+    Container::new(filters_column)
+        .width(Length::Fill)
+        .style(theme::Container::Custom(Box::new(BackgroundStyle)))
 }
 
 fn create_loading_view() -> Element<'static, Message> {
@@ -330,11 +361,42 @@ fn create_photo_card(photo: &Photo, index: usize, is_selected: bool) -> Button<M
         })
 }
 
+fn create_sorting_controls(app: &PhotoOrganizer) -> Container<'static, Message> {
+    let sort_criteria = Row::new()
+        .push(Text::new("Sort by:").size(14))
+        .push(
+            Radio::new("Name", SortCriteria::Name, Some(app.sort_criteria), move |v| Message::SortCriteriaChanged(v))
+        )
+        .push(
+            Radio::new("Date", SortCriteria::Date, Some(app.sort_criteria), move |v| Message::SortCriteriaChanged(v))
+        )
+        .push(
+            Radio::new("Size", SortCriteria::Size, Some(app.sort_criteria), move |v| Message::SortCriteriaChanged(v))
+        );
+
+    let sort_order = Button::new(
+        Text::new(match app.sort_order {
+            SortOrder::Ascending => "↑ Ascending",
+            SortOrder::Descending => "↓ Descending",
+        })
+    )
+    .on_press(Message::ToggleSortOrder);
+
+    Container::new(
+        Column::new()
+            .push(sort_criteria)
+            .push(sort_order)
+            .spacing(15)
+    )
+    .width(Length::Fill)
+    .style(theme::Container::Custom(Box::new(BackgroundStyle)))
+}
+
 impl PhotoOrganizer {
     fn apply_filters(&mut self) {
         let search_term = self.search_term.to_lowercase();
-        
-        self.filtered_photos = self.photos.iter()
+
+        let filtered = self.photos.iter()
             .filter(|photo| {
                 if !search_term.is_empty() {
                     photo.name.to_lowercase().contains(&search_term)
@@ -359,8 +421,56 @@ impl PhotoOrganizer {
                 }
             })
             .cloned()
-            .collect();
+            .collect::<Vec<Photo>>();
+
+        let mut photo_times: HashMap<PathBuf, SystemTime> = HashMap::new();
+
+        let mut sorted_filtered = filtered;
         
+        for photo in &sorted_filtered {
+            if let Ok(metadata) = std::fs::metadata(&photo.path) {
+                if let Ok(modified) = metadata.modified() {
+                    photo_times.insert(photo.path.clone(), modified);
+                }
+            }
+        }
+
+        match (self.sort_criteria, self.sort_order) {
+            (SortCriteria::Name, SortOrder::Ascending) => {
+                sorted_filtered.sort_by(|a, b| a.name.cmp(&b.name));
+            }
+            (SortCriteria::Name, SortOrder::Descending) => {
+                sorted_filtered.sort_by(|a, b| b.name.cmp(&a.name));
+            }
+            (SortCriteria::Date, SortOrder::Ascending) => {
+                sorted_filtered.sort_by(|a, b| {
+                    let a_time = photo_times.get(&a.path);
+                    let b_time = photo_times.get(&b.path);
+                    match (a_time, b_time) {
+                        (Some(a), Some(b)) => a.cmp(&b),
+                        _ => Ordering::Equal,
+                    }
+                });
+            }
+            (SortCriteria::Date, SortOrder::Descending) => {
+                sorted_filtered.sort_by(|a, b| {
+                    let a_time = photo_times.get(&a.path);
+                    let b_time = photo_times.get(&b.path);
+                    match (a_time, b_time) {
+                        (Some(a), Some(b)) => b.cmp(&a),
+                        _ => Ordering::Equal,
+                    }
+                });
+            }
+            (SortCriteria::Size, SortOrder::Ascending) => {
+                sorted_filtered.sort_by(|a, b| a.size.cmp(&b.size));
+            }
+            (SortCriteria::Size, SortOrder::Descending) => {
+                sorted_filtered.sort_by(|a, b| b.size.cmp(&a.size));
+            }
+        }
+        
+        self.filtered_photos = sorted_filtered;
         self.row_count = (self.filtered_photos.len() + 5) / 6;
     }
 }
