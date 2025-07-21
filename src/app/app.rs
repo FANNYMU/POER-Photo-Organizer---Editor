@@ -1,10 +1,13 @@
-use iced::{Application, Command, Element, Settings, executor, Subscription, theme, Color, Background};
+use iced::{Application, Command, Element, Settings, executor, Subscription, theme, Color};
 use iced::widget::{Column, Row, Scrollable, Container, Button, Text, Space};
 use iced::alignment::{Horizontal, Vertical};
 use iced::{Length, Padding};
-use std::path::PathBuf;
-use walkdir::WalkDir;
 use iced::widget::Image;
+
+pub use app::photo_loader::{load_photos, Photo};
+pub use app::photo_card_style::PhotoCardStyle;
+pub use app::ui_styles::{HeaderStyle, BackgroundStyle, ScrollableStyle};
+use crate::app;
 
 pub fn main() -> iced::Result {
     PhotoOrganizer::run(Settings {
@@ -56,7 +59,7 @@ impl Application for PhotoOrganizer {
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::PhotosLoaded(list) => {
-                self.row_count = (list.len() + 5) / 6; // Calculate rows needed for grid
+                self.row_count = (list.len() + 5) / 6;
                 self.photos = list;
                 self.loading = false;
                 Command::none()
@@ -194,156 +197,4 @@ fn create_photo_card(photo: &Photo, index: usize, is_selected: bool) -> Button<M
         } else {
             Message::PhotoSelected(index)
         })
-}
-
-// Custom styles
-struct HeaderStyle;
-impl iced::widget::container::StyleSheet for HeaderStyle {
-    type Style = iced::Theme;
-
-    fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
-        iced::widget::container::Appearance {
-            background: Some(Background::Color(Color::WHITE)),
-            border_radius: 0.0.into(),
-            border_width: 0.0,
-            border_color: Color::from_rgb(0.9, 0.9, 0.9),
-            text_color: None,
-        }
-    }
-}
-
-struct BackgroundStyle;
-impl iced::widget::container::StyleSheet for BackgroundStyle {
-    type Style = iced::Theme;
-
-    fn appearance(&self, _style: &Self::Style) -> iced::widget::container::Appearance {
-        iced::widget::container::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.98, 0.98, 0.98))),
-            border_radius: 0.0.into(),
-            border_width: 0.0,
-            border_color: Color::TRANSPARENT,
-            text_color: None,
-        }
-    }
-}
-
-struct ScrollableStyle;
-impl iced::widget::scrollable::StyleSheet for ScrollableStyle {
-    type Style = iced::Theme;
-
-    fn active(&self, _style: &Self::Style) -> iced::widget::scrollable::Scrollbar {
-        iced::widget::scrollable::Scrollbar {
-            background: Some(Background::Color(Color::from_rgb(0.9, 0.9, 0.9))),
-            border_radius: 5.0.into(),
-            border_width: 0.0,
-            border_color: Color::TRANSPARENT,
-            scroller: iced::widget::scrollable::Scroller {
-                color: Color::from_rgb(0.7, 0.7, 0.7),
-                border_radius: 5.0.into(),
-                border_width: 0.0,
-                border_color: Color::TRANSPARENT,
-            },
-        }
-    }
-
-    fn hovered(&self, _style: &Self::Style, _is_mouse_over_scrollbar: bool) -> iced::widget::scrollable::Scrollbar {
-        self.active(_style)
-    }
-}
-
-struct PhotoCardStyle {
-    is_selected: bool,
-}
-
-impl iced::widget::button::StyleSheet for PhotoCardStyle {
-    type Style = iced::Theme;
-
-    fn active(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        let base_color = if self.is_selected {
-            Color::from_rgb(0.95, 0.97, 1.0)
-        } else {
-            Color::WHITE
-        };
-
-        let border_width = if self.is_selected { 3.0 } else { 1.0 };
-        let border_color = if self.is_selected {
-            Color::from_rgb(0.2, 0.5, 0.9)
-        } else {
-            Color::from_rgb(0.9, 0.9, 0.9)
-        };
-
-        iced::widget::button::Appearance {
-            background: Some(Background::Color(base_color)),
-            border_radius: 12.0.into(),
-            border_width,
-            border_color,
-            shadow_offset: iced::Vector::new(0.0, 2.0),
-            text_color: Color::BLACK,
-        }
-    }
-
-    fn hovered(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        iced::widget::button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.95, 0.95, 0.95))),
-            border_radius: 12.0.into(),
-            border_width: 2.0,
-            border_color: Color::from_rgb(0.2, 0.5, 0.9),
-            shadow_offset: iced::Vector::new(0.0, 4.0),
-            text_color: Color::BLACK,
-        }
-    }
-
-    fn pressed(&self, _style: &Self::Style) -> iced::widget::button::Appearance {
-        iced::widget::button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.9, 0.9, 0.9))),
-            border_radius: 12.0.into(),
-            border_width: 2.0,
-            border_color: Color::from_rgb(0.2, 0.5, 0.9),
-            shadow_offset: iced::Vector::new(0.0, 1.0),
-            text_color: Color::BLACK,
-        }
-    }
-
-    fn disabled(&self, style: &Self::Style) -> iced::widget::button::Appearance {
-        self.active(style)
-    }
-}
-
-#[derive(Clone, Debug)]
-struct Photo {
-    path: PathBuf,
-    name: String,
-}
-
-async fn load_photos() -> Vec<Photo> {
-    let mut photos = Vec::new();
-    let pictures_dir = dirs::picture_dir().unwrap_or_else(|| PathBuf::from("~/Pictures"));
-
-    for entry in WalkDir::new(pictures_dir).max_depth(3) {
-        if let Ok(entry) = entry {
-            let path = entry.path().to_path_buf();
-
-            if path.is_file() && is_image(&path) {
-                let name = path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-
-                photos.push(Photo { path, name });
-            }
-        }
-    }
-
-    // Sort photos by name for consistent ordering
-    photos.sort_by(|a, b| a.name.cmp(&b.name));
-    photos
-}
-
-fn is_image(path: &PathBuf) -> bool {
-    let extension = path.extension().and_then(|e| e.to_str());
-    matches!(
-        extension,
-        Some("jpg" | "jpeg" | "png" | "gif" | "bmp" | "tiff" | "webp" | "JPG" | "JPEG" | "PNG")
-    )
 }
