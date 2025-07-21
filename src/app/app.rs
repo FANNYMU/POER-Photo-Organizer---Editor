@@ -33,7 +33,6 @@ pub enum SizeFilter {
     Small,
     Medium,
     Large,
-    Custom(u32),
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +118,8 @@ impl Application for PhotoOrganizer {
         
         let content = if self.loading {
             create_loading_view()
+        } else if self.filtered_photos.is_empty() {
+            create_empty_view()
         } else {
             create_photo_grid(&self.filtered_photos, self.selected_photo)
         };
@@ -163,7 +164,7 @@ fn create_header() -> Container<'static, Message> {
         .style(theme::Container::Custom(Box::new(HeaderStyle)))
 }
 
-fn create_filters<'a>(app: &'a PhotoOrganizer) -> Container<'a, Message> {
+fn create_filters(app: &PhotoOrganizer) -> Container<Message> {
     let search_input = Text::new("Search:")
         .size(14)
         .style(theme::Text::Color(Color::from_rgb(0.6, 0.6, 0.6)));
@@ -267,7 +268,7 @@ impl iced::widget::button::StyleSheet for PhotoCardStyle {
     type Style = iced::Theme;
 
     fn active(&self, theme: &Self::Style) -> iced::widget::button::Appearance {
-        let palette = theme.extended_palette();
+        let _palette = theme.extended_palette();
         
         iced::widget::button::Appearance {
             background: Some(iced::Background::Color(Color::from_rgba(0.95, 0.95, 0.95, 0.8))),
@@ -279,7 +280,7 @@ impl iced::widget::button::StyleSheet for PhotoCardStyle {
     }
 
     fn hovered(&self, theme: &Self::Style) -> iced::widget::button::Appearance {
-        let palette = theme.extended_palette();
+        let _palette = theme.extended_palette();
         
         iced::widget::button::Appearance {
             background: Some(iced::Background::Color(Color::from_rgba(0.98, 0.98, 0.98, 0.9))),
@@ -290,7 +291,7 @@ impl iced::widget::button::StyleSheet for PhotoCardStyle {
     }
 
     fn pressed(&self, theme: &Self::Style) -> iced::widget::button::Appearance {
-        let palette = theme.extended_palette();
+        let _palette = theme.extended_palette();
         
         iced::widget::button::Appearance {
             background: Some(iced::Background::Color(Color::from_rgba(0.92, 0.92, 0.92, 0.85))),
@@ -353,9 +354,8 @@ impl PhotoOrganizer {
                 match self.size_filter {
                     SizeFilter::All => true,
                     SizeFilter::Small => photo.width * photo.height <= 100_000,
-                    SizeFilter::Medium => photo.width * photo.height > 100_000 && photo.width * photo.height <= 500_000,
-                    SizeFilter::Large => photo.width * photo.height > 500_000,
-                    SizeFilter::Custom(min_size) => photo.width * photo.height >= min_size,
+                    SizeFilter::Medium => photo.width * photo.height > 100_000 && photo.width * photo.height < 500_000,
+                    SizeFilter::Large => photo.width * photo.height >= 500_000,
                 }
             })
             .cloned()
