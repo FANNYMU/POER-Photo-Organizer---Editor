@@ -1,11 +1,14 @@
 use std::path::PathBuf;
 use walkdir::WalkDir;
 use std::fs;
+use image::GenericImageView;
 
 #[derive(Clone, Debug)]
 pub struct Photo {
     pub path: PathBuf,
     pub name: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 pub async fn load_photos() -> Vec<Photo> {
@@ -23,7 +26,18 @@ pub async fn load_photos() -> Vec<Photo> {
                     .to_string_lossy()
                     .to_string();
 
-                photos.push(Photo { path, name });
+                let img = image::open(&path);
+                let (width, height) = match img {
+                    Ok(img) => img.dimensions(),
+                    Err(_) => (0, 0),
+                };
+
+                photos.push(Photo {
+                    path,
+                    name,
+                    width,
+                    height,
+                });
             }
         }
     }

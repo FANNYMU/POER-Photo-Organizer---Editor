@@ -1,4 +1,4 @@
 pub mod app;
 pub mod photo_card_style;
-mod photo_loader;
-mod ui_styles;
+pub mod photo_loader;
+pub mod ui_styles;
